@@ -2,3 +2,4 @@ numpy==2.3.2
 matplotlib==3.10.5
 pandas==2.3.2
 wfdb==4.3.0
+scipy==1.16.2
