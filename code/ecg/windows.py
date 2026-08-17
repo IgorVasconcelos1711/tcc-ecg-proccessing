@@ -13,6 +13,7 @@ class WindowManager:
         fs=DEFAULT_FS,
     ):
         self.fs = fs
+        # TODO: currently called with one channel (1D). Restore both channels for ML.
         self.filtered_r_peaks_windows = self.get_r_peaks_windows(
             synced_labels, synced_filtered_peaks, filtered_signal, window_span_ms
         )

@@ -3,13 +3,22 @@ import numpy as np
 from .config import ARRHYTHMIA_SYMBOLS
 
 
+# TODO: single-channel handling is temporary. ML will use both ECG channels;
+# keep 2D (samples, channels) windows and drop this 1D fallback when that lands.
+def _as_1d(window, channel_idx=0):
+    arr = np.asarray(window)
+    if arr.ndim >= 2:
+        return arr[:, channel_idx]
+    return arr
+
+
 def initialize_templates(windows_list, channel_idx=0):
     candidates = [item.get("window", item.get("signal")) for item in windows_list[:6]]
 
     if len(candidates) < 2:
         raise ValueError("Número insuficiente de candidatos (mínimo 2).")
 
-    areas = np.array([np.sum(np.abs(cand[:, channel_idx])) for cand in candidates])
+    areas = np.array([np.sum(np.abs(_as_1d(cand, channel_idx))) for cand in candidates])
     mean_area = np.mean(areas)
     diff_to_mean = np.abs(areas - mean_area)
 
@@ -24,8 +33,8 @@ def initialize_templates(windows_list, channel_idx=0):
     templates = None
     for i in range(len(ranked_indices) - 1):
         idx1, idx2 = ranked_indices[i], ranked_indices[i + 1]
-        cand1 = candidates[idx1][:, channel_idx]
-        cand2 = candidates[idx2][:, channel_idx]
+        cand1 = _as_1d(candidates[idx1], channel_idx)
+        cand2 = _as_1d(candidates[idx2], channel_idx)
         corr = np.corrcoef(cand1, cand2)[0, 1]
         if corr > 0.95:
             templates = [candidates[idx1], candidates[idx2]]
@@ -38,9 +47,9 @@ def initialize_templates(windows_list, channel_idx=0):
 
 
 def update_templates(templates, new_normal_window, channel_idx=0):
-    cand_new = new_normal_window[:, channel_idx]
-    corr0 = np.corrcoef(cand_new, templates[0][:, channel_idx])[0, 1]
-    corr1 = np.corrcoef(cand_new, templates[1][:, channel_idx])[0, 1]
+    cand_new = _as_1d(new_normal_window, channel_idx)
+    corr0 = np.corrcoef(cand_new, _as_1d(templates[0], channel_idx))[0, 1]
+    corr1 = np.corrcoef(cand_new, _as_1d(templates[1], channel_idx))[0, 1]
 
     if corr0 > corr1:
         templates[0] = new_normal_window
