@@ -60,11 +60,11 @@ def update_templates(templates, new_normal_window, channel_idx=0):
 
 
 def extract_average_energy(window, window_size=0):
-    signal = window["signal"] if isinstance(window, dict) else window
+    signal = window["signal"]
     if window_size == 0:
         window_size = len(signal)
     segment = signal[:window_size]
-    return float(np.mean(np.square(segment)))
+    return np.mean(np.square(segment))
 
 
 def split_annotations_by_type(annotation, fs, arrhythmia_symbols=None):
