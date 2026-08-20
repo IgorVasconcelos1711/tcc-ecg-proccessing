@@ -18,6 +18,35 @@ def get_available_patients(path):
     return sorted(ids)
 
 
+def lead_names(record_id, records_folder=RECORDS_FOLDER):
+    """Return ECG lead names from the MIT-BIH ``.hea`` file."""
+    hea = Path(records_folder) / f"{record_id}.hea"
+    leads = []
+    for line in hea.read_text().splitlines()[1:]:
+        if line.startswith("#"):
+            break
+        parts = line.split()
+        if len(parts) >= 9:
+            leads.append(parts[-1])
+    return leads
+
+
+def mlii_channel(record_id, records_folder=RECORDS_FOLDER):
+    """Index of the MLII lead when present, else channel 0."""
+    for i, name in enumerate(lead_names(record_id, records_folder)):
+        if name.upper() == "MLII":
+            return i
+    return 0
+
+
+def choose_ecg_channel(subject, min_detection_rate=0.5):
+    """Always use channel 0 — same lead index for every subject.
+
+    ``min_detection_rate`` is kept for API compatibility but ignored.
+    """
+    return 0
+
+
 get_available_pacients = get_available_patients
 
 
