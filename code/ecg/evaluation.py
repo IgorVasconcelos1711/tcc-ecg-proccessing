@@ -9,14 +9,12 @@ from dataclasses import dataclass, field
 import numpy as np
 import pandas as pd
 
-from .classifier import BeatClassification, RhythmClass, WaveformClass, classify_and_adapt
+from .classifier import BeatClassification, RhythmClass, WaveformClass
 from .config import HEARTY_TOTAL_DELAY, PEAK_TOLERANCE_MS, TEMPLATE_INIT_BEATS
 from .detection import synchronize_peaks
-from .features import initialize_templates
 from .hearty_classify import classify_hearty_beats
 from .hearty_pants import detect_hearty_beats
 from .hearty_scoring import HeartySimResult
-from .windows import WindowManager
 
 GRADL_OMIT_RECORDS = {"104", "109", "111", "118", "124", "203", "214", "231", "232"}
 
