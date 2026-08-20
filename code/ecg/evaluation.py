@@ -11,8 +11,10 @@ import pandas as pd
 
 from .classifier import BeatClassification, RhythmClass, WaveformClass, classify_and_adapt
 from .config import HEARTY_TOTAL_DELAY, PEAK_TOLERANCE_MS, TEMPLATE_INIT_BEATS
-from .detection import align_peaks, detect_qrs_for_subject, synchronize_peaks
+from .detection import synchronize_peaks
 from .features import initialize_templates
+from .hearty_classify import classify_hearty_beats
+from .hearty_pants import detect_hearty_beats
 from .hearty_scoring import HeartySimResult
 from .windows import WindowManager
 
@@ -163,21 +165,20 @@ def _annotation_map(subject):
     return mapping
 
 
-def _score_hearty(subject, peak_indices, classifications, learning_beats, channel=0):
+def _score_hearty(subject, beat_times, classifications, learning_times, channel=0):
     """Drive HeartySimResult sample-by-sample (HeartyActivity bookkeeping).
 
-    Beats are scored at ``peak + TOTAL_DELAY`` so ``currentLabel`` has rotated
-    the same way as in Hearty (newBeat fires when segmentation finishes).
+    ``beat_times`` / ``learning_times`` are absolute sample indices when
+    ``newBeat`` fires (segmentation FINISHED), matching Hearty.
     """
     n_samples = len(subject.raw_signal[:, channel])
     ann_at = _annotation_map(subject)
     delay = HEARTY_TOTAL_DELAY
 
-    def _delayed(peak):
-        return min(int(peak) + delay, n_samples - 1)
-
-    learning_at = {_delayed(p) for p in learning_beats}
-    classified_at = {_delayed(p): c for p, c in zip(peak_indices, classifications)}
+    learning_at = {min(int(t), n_samples - 1) for t in learning_times}
+    classified_at = {
+        min(int(t), n_samples - 1): c for t, c in zip(beat_times, classifications)
+    }
 
     sim = HeartySimResult(total_delay=delay)
     learning = True
@@ -220,63 +221,36 @@ def _process_subject(
     if channel is None:
         channel = 0
 
-    detected = detect_qrs_for_subject(subject, channel=channel)
-    aligned = align_peaks(
-        detected,
-        subject.raw_signal[:, channel],
-        search_window_ms=align_search_ms,
-        fs=subject.fs,
-    )
-
-    dummy_labels = ["?"] * len(aligned)
-    wm = WindowManager(
-        synced_filtered_peaks=aligned,
-        synced_labels=dummy_labels,
-        synced_integrated_peaks=detected,
-        integrated_signal=subject.integrated_signal[:, channel],
-        filtered_signal=subject.filtered_signal[:, channel],
-        fs=subject.fs,
-    )
-
-    peak_indices = wm.filtered_peak_indices
-    windows = wm.filtered_r_peaks_windows
+    run = detect_hearty_beats(subject.raw_signal[:, channel], fs=subject.fs)
+    beats = [b for b in run.beats if not b.invalid and len(b.values) > 0]
 
     result = SubjectEvaluation(
         record_id=str(subject.number),
         n_annotated=len(subject.annotations.sample),
-        n_detected_synced=len(peak_indices),
-        n_undetected=max(len(subject.annotations.sample) - len(peak_indices), 0),
+        n_detected_synced=len(beats),
+        n_undetected=max(len(subject.annotations.sample) - len(beats), 0),
     )
 
-    if len(windows) < template_beats + 1:
+    if len(beats) < template_beats + 1:
         result.template_init_failed = True
         result.skip_reason = "insufficient windows for templates"
         return result
 
     try:
-        templates = initialize_templates(windows, channel_idx=0)
+        _, classifications = classify_hearty_beats(beats, start_idx=template_beats)
     except ValueError:
         result.template_init_failed = True
         result.skip_reason = "template initialization failed"
         return result
 
-    _, classifications, _ = classify_and_adapt(
-        windows,
-        templates,
-        peak_indices,
-        subject.fs,
-        start_idx=template_beats,
-        channel_idx=0,
-    )
-
-    learning_beats = peak_indices[:template_beats]
-    scored_peaks = peak_indices[template_beats:]
+    learning_beats = beats[:template_beats]
+    scored_beats = beats[template_beats:]
 
     sim = _score_hearty(
         subject,
-        scored_peaks,
-        classifications,
-        learning_beats=learning_beats,
+        beat_times=[b.finish_sample for b in scored_beats],
+        classifications=classifications,
+        learning_times=[b.finish_sample for b in learning_beats],
         channel=channel,
     )
 
@@ -291,16 +265,16 @@ def _process_subject(
     result.detection_rate = sim.detection_rate
     result.n_undetected = max(sim.num_total_beats_ref - sim.num_total_beats, 0)
 
-    # Debug views: nearest-annotation pairing (not used for Table I counts).
+    scored_r = [b.r_sample for b in scored_beats]
     synced_r, _, synced_labels = synchronize_peaks(
         annotated_peaks=subject.annotations.sample,
         labels=subject.annotations.symbol,
-        detected_r_peaks=scored_peaks,
-        detected_int_peaks=scored_peaks,
+        detected_r_peaks=scored_r,
+        detected_int_peaks=scored_r,
         fs=subject.fs,
         tolerance_ms=peak_tolerance_ms,
     )
-    clf_by_peak = {int(p): c for p, c in zip(scored_peaks, classifications)}
+    clf_by_peak = {int(p): c for p, c in zip(scored_r, classifications)}
     kept_clf = []
     kept_sym = []
     for p, sym in zip(synced_r, synced_labels):
